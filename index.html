@@ -234,6 +234,10 @@ svg.i{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:2.2;stro
 .cropper canvas{display:block;width:200px;height:200px;max-width:100%;border-radius:50%;margin:0 auto 12px;touch-action:none;cursor:grab;box-shadow:0 0 0 4px var(--bg), 0 0 0 7px var(--c, var(--accent));background:var(--surface-2)}
 .cz{display:flex;align-items:center;gap:10px;color:var(--muted);font-weight:800;max-width:300px;margin:0 auto}
 .cz .range{margin:0;flex:1}
+.pswipe{position:relative;display:inline-flex;border-radius:999px;max-width:100%}
+.pswipe .person{position:relative;z-index:1;touch-action:pan-y;transition:transform .2s;max-width:100%}
+.ptrash{position:absolute;inset:0;border-radius:999px;background:var(--danger);color:#fff;display:flex;align-items:center;justify-content:flex-end;padding-right:14px;font-weight:800;font-size:14px;visibility:hidden;cursor:pointer}
+.pswipe.on .ptrash{visibility:visible}
 .toast{position:fixed;left:50%;top:calc(16px + env(safe-area-inset-top,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:999px;font-weight:700;font-size:14px;z-index:40;box-shadow:var(--shadow);animation:fade .2s;max-width:calc(100% - 32px);text-align:center}
 @media (max-width:420px){
   .row{padding-left:12px;min-height:84px}
@@ -300,8 +304,8 @@ function textOn(hex){
 const cvars = c => `--c:${c};--t:${textOn(c)}`;
 
 function seed(){
-  return { players: ['Rendall','Hopkirk'].map((n,i) => ({id:uid(), name:n, acct:'', seated:true, color:COLORS[i]})),
-    stake:100, limit:3, rounds:[], cur:null, sample:true };
+  return { players: [],
+    stake:100, limit:3, rounds:[], cur:null, sample:false };
 }
 function load(){
   try{ const raw = localStorage.getItem(LS); if(raw){ const s = JSON.parse(raw); if(s && Array.isArray(s.players)) return s; } }catch(e){}
@@ -597,6 +601,45 @@ function openSheet(title, body, mount){
 function closeSheet(){ const sh = $('#sheet'); sh.hidden = true; sh.innerHTML = ''; confirmKey = null; }
 
 const ICON_QR = '<svg viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M8 12h8"/></svg>';
+function forgetPerson(id, reopen){
+  const k = S.people[id]; if(!k) return;
+  if(S.players.some(p => p.id === id)){ toast(`${k.name} je u stolu, nejdřív ho odeberte ze hry`); reopen(); return; }
+  if(S.rounds.some(r => r.parts.includes(id))){ toast(`${k.name} dnes hrál, smazat půjde po novém večeru`); reopen(); return; }
+  const snap = JSON.stringify(S);
+  delete S.people[id];
+  S.parties.forEach(pt => pt.members = pt.members.filter(m => m !== id));
+  save(); reopen();
+  toast(`${k.name} smazán z databáze`, 'Vrátit', () => { S = JSON.parse(snap); save(); render(); reopen(); });
+}
+function bindPeopleSwipe(reopen){
+  const OPENP = 76;
+  document.querySelectorAll('.pswipe').forEach(w => {
+    const pill = w.querySelector('.person'); let sx = 0, sy = 0, dx = 0, base = 0, drag = false, active = false;
+    const close = () => { pill.style.transform = ''; w.classList.remove('open'); setTimeout(() => { if(!w.classList.contains('open')) w.classList.remove('on'); }, 220); };
+    pill.addEventListener('pointerdown', e => { if(e.button) return; sx = e.clientX; sy = e.clientY; dx = 0; drag = false; active = true; base = w.classList.contains('open') ? -OPENP : 0; });
+    pill.addEventListener('pointermove', e => {
+      if(!active) return; const mx = e.clientX - sx, my = e.clientY - sy;
+      if(!drag){
+        if(Math.abs(mx) > 8 && Math.abs(mx) > Math.abs(my) * 1.2){
+          drag = true; try{ pill.setPointerCapture(e.pointerId); }catch(_){}
+          w.classList.add('on'); document.querySelectorAll('.pswipe.open').forEach(o => { if(o !== w){ o.querySelector('.person').style.transform = ''; o.classList.remove('open','on'); } });
+        } else if(Math.abs(my) > 8) active = false;
+        return;
+      }
+      dx = Math.min(0, base + mx); pill.style.transition = 'none'; pill.style.transform = `translateX(${dx}px)`;
+    });
+    const end = () => {
+      if(!active) return; active = false; if(!drag) return;
+      pill.style.transition = ''; w._drag = true; setTimeout(() => w._drag = false, 60);
+      if(dx < -w.offsetWidth * 0.6){ pill.style.transform = `translateX(${-w.offsetWidth}px)`; setTimeout(() => forgetPerson(w.dataset.pid, reopen), 180); }
+      else if(dx < -36){ pill.style.transform = `translateX(${-OPENP}px)`; w.classList.add('open'); }
+      else close();
+    };
+    pill.addEventListener('pointerup', end); pill.addEventListener('pointercancel', end);
+    pill.addEventListener('click', e => { if(w._drag || w.classList.contains('open')){ e.stopPropagation(); e.preventDefault(); if(!w._drag) close(); } }, true);
+  });
+  document.querySelectorAll('[data-ptrash]').forEach(b => b.onclick = () => forgetPerson(b.dataset.ptrash, reopen));
+}
 function openPlayer(id){
   const isNew = !id;
   const used = new Set(S.rounds.flatMap(r => r.parts).concat(started() ? S.cur.parts : []));
@@ -607,7 +650,8 @@ function openPlayer(id){
   let skulls = ''; for(let i = 0; i < Math.min(S.limit, 3); i++) skulls += `<i class="dot ${i === 0 ? 'on' : ''}"></i>`;
   const body = `
     ${known.length ? `<div class="gl">Vybrat z databáze</div>
-      <div class="people">${known.map(k => `<button class="person" data-pick="${k.id}" style="${cvars(k.color)}">${avatar(k)}${esc(k.name)}</button>`).join('')}</div>
+      <div class="people">${known.map(k => `<span class="pswipe" data-pid="${k.id}"><span class="ptrash" data-ptrash="${k.id}">Smazat</span><button class="person" data-pick="${k.id}" style="${cvars(k.color)}">${avatar(k)}${esc(k.name)}</button></span>`).join('')}</div>
+      <p class="hint" style="margin-top:0">Přejetím doleva hráče z databáze smažete.</p>
       <div class="divider">nebo nový hráč</div>` : ''}
     <div class="preview" id="pv" style="${cvars(p.color)}">
       <span style="display:flex;align-items:center;gap:12px;min-width:0"><span id="pv-av">${avatar(p)}</span><span id="pv-n" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.name || 'Nový hráč')}</span></span>
@@ -694,6 +738,7 @@ function openPlayer(id){
       }catch(err){ toast('QR kód se nepodařilo přečíst'); }
     };
     ac.onblur = () => ac.classList.toggle('bad', !!ac.value.trim() && !toIBAN(ac.value));
+    bindPeopleSwipe(() => openPlayer(null));
     document.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => {
       const k = S.people[b.dataset.pick]; S.players.push({...k, seated:true}); S.sample = false;
       save(); closeSheet(); render(); toast(`${k.name} přisedl ke stolu`);
@@ -739,11 +784,42 @@ function openParties(){
          <p class="hint">${cur.length ? `Uloží se ${cur.length} hráčů: ${cur.map(x => esc(x.name)).join(', ')}.` : 'Nejdřív přidejte hráče.'}</p>`}
     ${people.length ? `<div class="gl">Databáze hráčů</div>
       <div class="people">${people.map(k => {
-        const removable = !inGame.has(k.id) && !inParty.has(k.id) && !inRounds.has(k.id);
-        return `<span class="person" style="${cvars(k.color)}">${avatar(k)}${esc(k.name)}${removable ? `<button class="btn sm ghost" data-forget="${k.id}" aria-label="Odebrat ${esc(k.name)} z databáze" style="padding:2px 6px;margin-left:2px">✕</button>` : ''}</span>`;
+        return `<span class="pswipe" data-pid="${k.id}"><span class="ptrash" data-ptrash="${k.id}">Smazat</span><span class="person" style="${cvars(k.color)}">${avatar(k)}${esc(k.name)}</span></span>`;
       }).join('')}</div>
-      <p class="hint">Hráče, který není ve hře ani v žádné partě, můžete z databáze odebrat křížkem.</p>` : ''}`;
+      <p class="hint">Přejetím doleva hráče z databáze smažete. Smaže se i ze všech part.</p>` : ''}
+    <div class="gl">Přenos do jiné aplikace</div>
+    <div class="group"><div class="it"><span>Zkopíruje všechny party i s fotkami a účty jako kód.</span><button class="btn sm pri" id="pt-exp" ${list.length ? '' : 'disabled'}>Kopírovat</button></div>
+      <div class="it"><span>Vloží kód zkopírovaný z jiné aplikace.</span><button class="btn sm" id="pt-imp">Vložit</button></div></div>
+    <textarea class="inp" id="pt-code" rows="4" hidden placeholder="Sem vložte kód (podržte prst → Vložit)" style="margin:-6px 0 10px;font-size:13px"></textarea>
+    <div class="actions" id="pt-impbar" hidden style="margin:0 0 16px"><span class="grow"></span><button class="btn pri" id="pt-load">Načíst party</button></div>`;
   openSheet('Party', body, () => {
+    const code = $('#pt-code');
+    const ex = $('#pt-exp');
+    ex && (ex.onclick = () => {
+      const ids = new Set(S.parties.flatMap(pt => pt.members));
+      const data = {v:1, parties:S.parties, people:[...ids].map(id => S.people[id]).filter(Boolean)};
+      const txt = 'PRSI1:' + btoa(unescape(encodeURIComponent(JSON.stringify(data))));
+      const fb = () => { code.hidden = false; code.value = txt; code.select(); toast('Kód je označený, zkopírujte ho'); };
+      if(navigator.clipboard) navigator.clipboard.writeText(txt).then(() => toast('Party zkopírovány, vložte je v druhé aplikaci'), fb); else fb();
+    });
+    $('#pt-imp').onclick = () => { code.hidden = false; code.value = ''; $('#pt-impbar').hidden = false; code.focus(); };
+    $('#pt-load').onclick = () => {
+      let data;
+      try{
+        const t = code.value.trim().replace(/^.*?PRSI1:/s, '').replace(/\s+/g, '');
+        data = JSON.parse(decodeURIComponent(escape(atob(t))));
+      }catch(e){ toast('Kód se nepodařilo přečíst, zkopírujte ho celý'); return; }
+      (data.people || []).forEach(k => { if(k && k.id) S.people[k.id] = {id:k.id, name:k.name, acct:k.acct || '', color:k.color || COLORS[0], photo:k.photo || ''}; });
+      let added = 0, skipped = 0;
+      (data.parties || []).forEach(pt => {
+        const i = S.parties.findIndex(x => x.id === pt.id);
+        if(i > -1){ S.parties[i] = pt; added++; }
+        else if(S.parties.length < 5){ S.parties.push(pt); added++; }
+        else skipped++;
+      });
+      save(); openParties();
+      toast(skipped ? `Načteno ${added}, ${skipped} se nevešly (max 5 part)` : `Načteno part: ${added}`);
+    };
     const ps = $('#pt-save');
     ps && (ps.onclick = () => {
       const name = $('#pt-name').value.trim() || `Parta ${list.length + 1}`;
@@ -770,11 +846,7 @@ function openParties(){
       if(confirmKey !== 'pdel' + pid){ confirmKey = 'pdel' + pid; b.textContent = 'Opravdu?'; b.classList.add('dng'); return; }
       S.parties = S.parties.filter(x => x.id !== pid); save(); openParties(); toast('Parta smazána');
     });
-    document.querySelectorAll('[data-forget]').forEach(b => b.onclick = () => {
-      const kid = b.dataset.forget;
-      if(confirmKey !== 'f' + kid){ confirmKey = 'f' + kid; b.textContent = 'Odebrat?'; return; }
-      delete S.people[kid]; save(); openParties();
-    });
+    bindPeopleSwipe(openParties);
   });
 }
 
@@ -790,7 +862,7 @@ function openSettings(){
     <div class="gl">Nový večer</div>
     <div class="group"><div class="it"><span>Smaže všechna kola. Hráči, barvy a účty zůstanou.</span><button class="btn sm dng" id="st-reset">Začít znovu</button></div></div>
     <div class="gl">Výchozí stav</div>
-    <div class="group"><div class="it"><span>Smaže hráče i kola a nastaví výchozí hráče Rendall a Hopkirk. Party a databáze hráčů zůstanou.</span><button class="btn sm dng" id="st-default">Obnovit</button></div></div>`;
+    <div class="group"><div class="it"><span>Smaže hráče ze stolu i všechna kola. Party a databáze hráčů zůstanou.</span><button class="btn sm dng" id="st-default">Obnovit</button></div></div>`;
   openSheet('Nastavení', body, () => {
     $('#st-stake').onchange = e => { const x = Math.max(1, Math.round(+e.target.value || 100)); S.stake = x; e.target.value = x; save(); render(); };
     $('#st-limit').onchange = e => { const x = Math.max(1, Math.min(6, Math.round(+e.target.value || 3))); S.limit = x; e.target.value = x; save(); render(); };
@@ -801,7 +873,7 @@ function openSettings(){
     $('#st-default').onclick = e => {
       if(confirmKey === 'default'){
         S.players.forEach(remember);
-        const fresh = seed(); S.players = fresh.players; S.rounds = []; S.cur = null; S.sample = true;
+        const fresh = seed(); S.players = fresh.players; S.rounds = []; S.cur = null; S.sample = false;
         S.players.forEach(remember); save(); closeSheet(); render(); toast('Obnoveno do výchozího stavu');
       } else { confirmKey = 'default'; e.target.textContent = 'Opravdu?'; }
     };

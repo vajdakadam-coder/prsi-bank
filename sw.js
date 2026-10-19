@@ -1,5 +1,5 @@
 // Prší Bank – offline cache. Network first, cache as fallback, so updates on the web show up straight away.
-const CACHE = 'prsi-bank-v1';
+const CACHE = 'prsi-bank-v2';
 const LOCAL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 const CDN = [
   'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js',

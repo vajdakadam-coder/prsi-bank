@@ -789,26 +789,27 @@ function openParties(){
       <p class="hint">Přejetím doleva hráče z databáze smažete. Smaže se i ze všech part.</p>` : ''}
     <div class="gl">Přenos do jiné aplikace</div>
     <div class="group"><div class="it"><span>Zkopíruje všechny party i s fotkami a účty jako kód.</span><button class="btn sm pri" id="pt-exp" ${list.length ? '' : 'disabled'}>Kopírovat</button></div>
-      <div class="it"><span>Vloží kód zkopírovaný z jiné aplikace.</span><button class="btn sm" id="pt-imp">Vložit</button></div></div>
+      <div class="it"><span>Vloží kód zkopírovaný z jiné aplikace.</span><button class="btn sm" id="pt-imp">Vložit</button></div>
+      <div class="it"><span>Uloží party jako soubor (Soubory, AirDrop, zpráva).</span><button class="btn sm" id="pt-fexp" ${list.length ? '' : 'disabled'}>Sdílet soubor</button></div>
+      <div class="it"><span>Načte party ze souboru.</span><label class="btn sm filebtn">Otevřít soubor<input type="file" id="pt-fimp" accept=".json,application/json,text/plain"></label></div></div>
     <textarea class="inp" id="pt-code" rows="4" hidden placeholder="Sem vložte kód (podržte prst → Vložit)" style="margin:-6px 0 10px;font-size:13px"></textarea>
     <div class="actions" id="pt-impbar" hidden style="margin:0 0 16px"><span class="grow"></span><button class="btn pri" id="pt-load">Načíst party</button></div>`;
   openSheet('Party', body, () => {
     const code = $('#pt-code');
-    const ex = $('#pt-exp');
-    ex && (ex.onclick = () => {
+    const exportText = () => {
       const ids = new Set(S.parties.flatMap(pt => pt.members));
       const data = {v:1, parties:S.parties, people:[...ids].map(id => S.people[id]).filter(Boolean)};
-      const txt = 'PRSI1:' + btoa(unescape(encodeURIComponent(JSON.stringify(data))));
-      const fb = () => { code.hidden = false; code.value = txt; code.select(); toast('Kód je označený, zkopírujte ho'); };
-      if(navigator.clipboard) navigator.clipboard.writeText(txt).then(() => toast('Party zkopírovány, vložte je v druhé aplikaci'), fb); else fb();
-    });
-    $('#pt-imp').onclick = () => { code.hidden = false; code.value = ''; $('#pt-impbar').hidden = false; code.focus(); };
-    $('#pt-load').onclick = () => {
+      return 'PRSI1:' + btoa(unescape(encodeURIComponent(JSON.stringify(data))));
+    };
+    const importText = raw => {
+      let t = String(raw || '');
+      const at = t.indexOf('PRSI1:'); if(at > -1) t = t.slice(at + 6);
+      t = t.replace(/-/g, '+').replace(/_/g, '/').replace(/[^A-Za-z0-9+/]/g, '');
+      if(!t){ toast('Kód je prázdný'); return; }
+      while(t.length % 4) t += '=';
       let data;
-      try{
-        const t = code.value.trim().replace(/^.*?PRSI1:/s, '').replace(/\s+/g, '');
-        data = JSON.parse(decodeURIComponent(escape(atob(t))));
-      }catch(e){ toast('Kód se nepodařilo přečíst, zkopírujte ho celý'); return; }
+      try{ data = JSON.parse(decodeURIComponent(escape(atob(t)))); }
+      catch(e){ toast(`Kód je neúplný nebo poškozený (${t.length} znaků). Zkuste přenos souborem.`); return; }
       (data.people || []).forEach(k => { if(k && k.id) S.people[k.id] = {id:k.id, name:k.name, acct:k.acct || '', color:k.color || COLORS[0], photo:k.photo || ''}; });
       let added = 0, skipped = 0;
       (data.parties || []).forEach(pt => {
@@ -820,6 +821,30 @@ function openParties(){
       save(); openParties();
       toast(skipped ? `Načteno ${added}, ${skipped} se nevešly (max 5 part)` : `Načteno part: ${added}`);
     };
+    const fx = $('#pt-fexp');
+    fx && (fx.onclick = async () => {
+      const txt = exportText();
+      const file = new File([txt], 'prsi-bank-party.json', {type:'application/json'});
+      try{
+        if(navigator.canShare && navigator.canShare({files:[file]})){ await navigator.share({files:[file], title:'Prší Bank – party'}); return; }
+      }catch(e){ if(e && e.name === 'AbortError') return; }
+      try{
+        const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name;
+        document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+      }catch(e){ toast('Soubor se nepodařilo uložit'); }
+    });
+    $('#pt-fimp').onchange = async e => {
+      const f = e.target.files[0]; e.target.value = ''; if(!f) return;
+      try{ importText(await f.text()); }catch(err){ toast('Soubor se nepodařilo přečíst'); }
+    };
+    const ex = $('#pt-exp');
+    ex && (ex.onclick = () => {
+      const txt = exportText();
+      const fb = () => { code.hidden = false; code.value = txt; code.select(); toast('Kód je označený, zkopírujte ho'); };
+      if(navigator.clipboard) navigator.clipboard.writeText(txt).then(() => toast('Party zkopírovány, vložte je v druhé aplikaci'), fb); else fb();
+    });
+    $('#pt-imp').onclick = () => { code.hidden = false; code.value = ''; $('#pt-impbar').hidden = false; code.focus(); };
+    $('#pt-load').onclick = () => importText(code.value);
     const ps = $('#pt-save');
     ps && (ps.onclick = () => {
       const name = $('#pt-name').value.trim() || `Parta ${list.length + 1}`;

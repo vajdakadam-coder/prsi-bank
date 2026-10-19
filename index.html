@@ -300,7 +300,7 @@ function textOn(hex){
 const cvars = c => `--c:${c};--t:${textOn(c)}`;
 
 function seed(){
-  return { players: ['Adamek','Tata','Petra','Michal','Ivana'].map((n,i) => ({id:uid(), name:n, acct:'', seated:true, color:COLORS[i]})),
+  return { players: ['Rendall','Hopkirk'].map((n,i) => ({id:uid(), name:n, acct:'', seated:true, color:COLORS[i]})),
     stake:100, limit:3, rounds:[], cur:null, sample:true };
 }
 function load(){
@@ -788,13 +788,22 @@ function openSettings(){
     <div class="gl">Rozehrané kolo</div>
     <div class="group"><div class="it"><span>Smazat všechny lebky v tomto kole</span><button class="btn sm dng" id="st-round" ${started() ? '' : 'disabled'}>Vynulovat</button></div></div>
     <div class="gl">Nový večer</div>
-    <div class="group"><div class="it"><span>Smaže všechna kola. Hráči, barvy a účty zůstanou.</span><button class="btn sm dng" id="st-reset">Začít znovu</button></div></div>`;
+    <div class="group"><div class="it"><span>Smaže všechna kola. Hráči, barvy a účty zůstanou.</span><button class="btn sm dng" id="st-reset">Začít znovu</button></div></div>
+    <div class="gl">Výchozí stav</div>
+    <div class="group"><div class="it"><span>Smaže hráče i kola a nastaví výchozí hráče Rendall a Hopkirk. Party a databáze hráčů zůstanou.</span><button class="btn sm dng" id="st-default">Obnovit</button></div></div>`;
   openSheet('Nastavení', body, () => {
     $('#st-stake').onchange = e => { const x = Math.max(1, Math.round(+e.target.value || 100)); S.stake = x; e.target.value = x; save(); render(); };
     $('#st-limit').onchange = e => { const x = Math.max(1, Math.min(6, Math.round(+e.target.value || 3))); S.limit = x; e.target.value = x; save(); render(); };
     $('#st-round').onclick = e => {
       if(confirmKey === 'round'){ S.cur = null; save(); closeSheet(); render(); toast('Kolo vynulováno'); }
       else { confirmKey = 'round'; e.target.textContent = 'Opravdu?'; }
+    };
+    $('#st-default').onclick = e => {
+      if(confirmKey === 'default'){
+        S.players.forEach(remember);
+        const fresh = seed(); S.players = fresh.players; S.rounds = []; S.cur = null; S.sample = true;
+        S.players.forEach(remember); save(); closeSheet(); render(); toast('Obnoveno do výchozího stavu');
+      } else { confirmKey = 'default'; e.target.textContent = 'Opravdu?'; }
     };
     $('#st-reset').onclick = e => {
       if(confirmKey === 'reset'){ S.rounds = []; S.cur = null; save(); closeSheet(); render(); toast('Nový večer připraven'); }
@@ -865,6 +874,12 @@ function openPay(){
   const nr = S.rounds.length;
   const body = `
     <p class="hint" style="margin-top:-8px">${nr} ${nr === 1 ? 'odehrané kolo' : (nr >= 2 && nr <= 4) ? 'odehraná kola' : 'odehraných kol'} · ${today}${started() ? ' · rozehrané kolo se nepočítá' : ''}</p>
+    ${played.length ? `<div class="gl">Bilance večera</div><div class="group">
+      ${played.sort((x,y) => n[y] - n[x]).map(id => { const a = n[id], p = P(id);
+        return `<div class="bal" style="${cvars(p.color)}"><div class="w">${esc(p.name)}</div>
+          <div class="track"><div class="fill ${a >= 0 ? 'pos' : 'neg'}" style="width:${Math.abs(a)/max*50}%"></div></div>
+          <div class="a num ${a > 0 ? 'pos-t' : a < 0 ? 'neg-t' : 'muted'}">${signed(a)}</div></div>`; }).join('')}
+    </div>` : ''}
     <div class="gl">Kdo komu zaplatí</div>
     <div class="group">
       ${tx.length ? tx.map((t,i) => {
@@ -878,12 +893,6 @@ function openPay(){
     ${tx.length ? `<div class="actions" style="margin:-4px 0 16px"><button class="btn" id="py-copy">Zkopírovat jako text</button></div>
       <textarea class="inp" id="py-rep" rows="${Math.min(8, tx.length + even.length)}" readonly hidden style="margin-bottom:16px">${esc(report)}</textarea>` : ''}
     ${tx.some(t => !toIBAN(P(t.to).acct)) ? `<p class="hint" style="margin-top:-8px">QR kód se zobrazí u hráčů, kteří mají vyplněný účet. Doplníte ho klepnutím na jméno hráče.</p>` : ''}
-    ${played.length ? `<div class="gl">Bilance večera</div><div class="group">
-      ${played.sort((x,y) => n[y] - n[x]).map(id => { const a = n[id], p = P(id);
-        return `<div class="bal" style="${cvars(p.color)}"><div class="w">${esc(p.name)}</div>
-          <div class="track"><div class="fill ${a >= 0 ? 'pos' : 'neg'}" style="width:${Math.abs(a)/max*50}%"></div></div>
-          <div class="a num ${a > 0 ? 'pos-t' : a < 0 ? 'neg-t' : 'muted'}">${signed(a)}</div></div>`; }).join('')}
-    </div>` : ''}
     ${nr ? `<div class="gl">Odehraná kola</div><div class="group hist">
       ${S.rounds.slice().reverse().map(r => `<div class="h"><div class="no num">${r.no}</div>
         <div class="d">${Object.entries(r.pay).map(([id,a]) => `${tag(id)}<span class="num" style="font-weight:700">${kc(a)}</span>`).join(' ')}
